@@ -1,0 +1,44 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: linksentinel
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/linksentinel}
+    username: ${DATABASE_USER:linksentinel}
+    password: ${DATABASE_PASSWORD:linksentinel}
+    hikari:
+      maximum-pool-size: 20
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      repositories:
+        enabled: false
+
+app:
+  base-url: ${APP_BASE_URL:http://localhost:8080}
+  cache-ttl: ${CACHE_TTL:1h}
+  cache-enabled: ${CACHE_ENABLED:true}
+  jwt-secret: ${JWT_SECRET:}
+  jwt-ttl: ${JWT_TTL:12h}
+  cors-origin: ${CORS_ORIGIN:http://localhost:5173}
+  rate-limit:
+    capacity: ${RATE_LIMIT_CAPACITY:30}
+    refill-per-second: ${RATE_LIMIT_REFILL:0.5}
+  llm:
+    provider: ${LLM_PROVIDER:openai}
+    base-url: ${LLM_BASE_URL:https://api.openai.com}
+    api-key: ${LLM_API_KEY:}
+    model: ${LLM_MODEL:gpt-4o-mini}
+    timeout: ${LLM_TIMEOUT:3s}
