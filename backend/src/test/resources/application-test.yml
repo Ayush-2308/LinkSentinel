@@ -1,0 +1,24 @@
+spring:
+  main:
+    banner-mode: off
+
+app:
+  base-url: http://localhost:8080
+  cache-ttl: 1h
+  cache-enabled: true
+  jwt-secret: test-secret-key-must-be-at-least-32-chars
+  jwt-ttl: 1h
+  cors-origin: http://localhost:5173
+  rate-limit:
+    capacity: 10000
+    refill-per-second: 1000
+  llm:
+    provider: openai
+    base-url: http://127.0.0.1:9
+    api-key: ""
+    model: test
+    timeout: 200ms
+
+logging:
+  level:
+    root: warn
