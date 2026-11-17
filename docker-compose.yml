@@ -37,6 +37,8 @@ services:
       REDIS_PORT: "6379"
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      DEMO_EMAIL: ${DEMO_EMAIL:-demo@linksentinel.local}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-password123}
     depends_on:
       postgres:
         condition: service_healthy

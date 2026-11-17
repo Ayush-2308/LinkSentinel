@@ -13,9 +13,13 @@ public record AppProperties(
         Duration jwtTtl,
         String corsOrigin,
         RateLimit rateLimit,
-        Llm llm) {
+        Llm llm,
+        Demo demo) {
 
     public record RateLimit(int capacity, double refillPerSecond) {
+    }
+
+    public record Demo(String email, String password) {
     }
 
     public record Llm(String provider, String baseUrl, String apiKey, String model, Duration timeout) {

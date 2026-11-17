@@ -18,6 +18,9 @@ app:
     api-key: ""
     model: test
     timeout: 200ms
+  demo:
+    email: ""
+    password: ""
 
 logging:
   level:

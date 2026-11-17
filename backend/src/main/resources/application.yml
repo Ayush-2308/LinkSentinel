@@ -42,3 +42,6 @@ app:
     api-key: ${LLM_API_KEY:}
     model: ${LLM_MODEL:gpt-4o-mini}
     timeout: ${LLM_TIMEOUT:3s}
+  demo:
+    email: ${DEMO_EMAIL:demo@linksentinel.local}
+    password: ${DEMO_PASSWORD:password123}

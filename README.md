@@ -35,6 +35,8 @@ copy .env.example .env
 
 Set `JWT_SECRET` to at least 32 characters. Leave `LLM_API_KEY` empty to use the rule checker, or set `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` for any OpenAI-compatible chat completions endpoint.
 
+On startup the API creates a demo user when `DEMO_EMAIL` and `DEMO_PASSWORD` are both set. The defaults are `demo@linksentinel.local` and `password123`. Sign in with those on the login page. If that email already exists, the password is left as it is.
+
 ```bash
 docker compose up --build
 ```
@@ -78,7 +80,7 @@ npm run e2e
 
 `npm test` is Vitest. `npm run e2e` is one Playwright flow: create an account, shorten `https://example.com/docs`, and see that URL in the list. The API has to be on port 8080 before the Playwright run.
 
-### Measured on 15 Nov 2026
+### Measured on 17 Nov 2026
 
 `.\mvnw.cmd test` in `backend`: 19 tests, 0 failures. Docker was not running, so Postgres and Redis were the embedded fallback (Postgres 18.6). The log line was `Integration services: embedded Postgres and Redis (Docker engine is not running)`.
 
@@ -86,17 +88,19 @@ Redirect load, 400 requests, 25 in flight, 30 warmup requests, HTTP 302 only, sa
 
 | Mode | p50 | p95 | requests/sec | errors |
 | --- | --- | --- | --- | --- |
-| Redis cache on | 155.59 ms | 352.28 ms | 133.9 | 0 |
-| Cache off, Postgres read | 219.62 ms | 457.85 ms | 104.8 | 0 |
+| Redis cache on | 176.26 ms | 616.50 ms | 104.1 | 0 |
+| Cache off, Postgres read | 214.27 ms | 399.31 ms | 110.0 | 0 |
 
 Source lines, written by the test to `backend/target/load-cached.txt` and `backend/target/load-uncached.txt`:
 
 ```
-mode=cached requests=400 concurrency=25 p50_ms=155.59 p95_ms=352.28 rps=133.9 errors=0
-mode=uncached requests=400 concurrency=25 p50_ms=219.62 p95_ms=457.85 rps=104.8 errors=0
+mode=cached requests=400 concurrency=25 p50_ms=176.26 p95_ms=616.50 rps=104.1 errors=0
+mode=uncached requests=400 concurrency=25 p50_ms=214.27 p95_ms=399.31 rps=110.0 errors=0
 ```
 
-Frontend, same day: `npm test` ran Vitest 5.1.0, 3 files, 5 tests, 0 failures, 14.91s. `npm run e2e` ran Playwright, 1 test, passed in 20.9s. That run saved the screenshots below. The API for that run was this app on port 8080 with the rule checker, because no LLM key was set.
+The cache lowered the median. On this run the tail and the requests/sec did not; both modes share one JVM and both still write clicks to Postgres.
+
+Frontend, 15 Nov 2026: `npm test` ran Vitest 5.1.0, 3 files, 5 tests, 0 failures, 14.91s. `npm run e2e` ran Playwright, 1 test, passed in 20.9s. That run saved the screenshots below. The API for that run was this app on port 8080 with the rule checker, because no LLM key was set.
 
 ## Screenshots
 
