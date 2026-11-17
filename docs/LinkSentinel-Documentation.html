@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>LinkSentinel documentation</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  body { font-family: "Segoe UI", sans-serif; color: #1c2430; line-height: 1.45; font-size: 11pt; }
+  h1 { font-size: 22pt; margin-bottom: 0.2em; }
+  h2 { font-size: 14pt; margin-top: 1.4em; border-bottom: 1px solid #d9dee7; padding-bottom: 0.15em; }
+  h3 { font-size: 12pt; margin-top: 1em; }
+  p, li { margin: 0.35em 0; }
+  code { font-family: Consolas, monospace; font-size: 0.92em; background: #f4f6f8; padding: 0 0.2em; }
+  table { border-collapse: collapse; width: 100%; margin: 0.6em 0 1em; font-size: 10pt; }
+  th, td { border: 1px solid #d9dee7; padding: 0.35em 0.5em; text-align: left; vertical-align: top; }
+  th { background: #f4f6f8; }
+  .muted { color: #5c6778; }
+  pre { background: #f4f6f8; padding: 0.7em 0.8em; white-space: pre-wrap; font-size: 9.5pt; }
+  img { max-width: 100%; border: 1px solid #d9dee7; margin: 0.4em 0 0.8em; }
+</style>
+</head>
+<body>
+<h1>LinkSentinel</h1>
+<p class="muted">URL shortener with cached redirects, rate limiting, click analytics, and link screening. Portfolio project for a fresher backend role. Documentation date: 17 Nov 2026.</p>
+
+<h2>1. What this project is</h2>
+<p>LinkSentinel lets a signed-in person turn a long URL into a short code, share that code, and see what happened when someone opened it. Creating the link also records whether the URL looks safe or unsafe. Opening the short link redirects immediately. The safety check and the click insert never sit on that redirect.</p>
+<p>Public shorteners get slow when every redirect reads the database, and they get used to hide phishing and spam. This app keeps the code-to-URL mapping in Redis, limits how fast one caller can hit the API, and screens the URL once, at creation time.</p>
+<p>It is one Spring Boot service plus a small React app. It is not a microservice system, and it has no admin panel.</p>
+
+<h2>2. Who it is for</h2>
+<ul>
+  <li>A person who shares a long link and wants a short one that still shows a safety verdict.</li>
+  <li>A small team that wants to know a shared link was opened, from which page, and on which kind of device.</li>
+  <li>A fresher showing Java, Spring Boot, Postgres, Redis, tests, and Docker in one project.</li>
+</ul>
+<p>The short address is the address of this app, not a rewrite of the target. <code>https://docuflow-gbh3.onrender.com/</code> stays that URL. Locally the short form is <code>http://localhost:8080/1</code>. Another computer cannot open <code>localhost</code>. Set <code>APP_BASE_URL</code> to a public host when the API is deployed, and new short links use that host. The target URL does not change.</p>
+
+<h2>3. How it works</h2>
+<h3>Sign in</h3>
+<p>Register and login take an email and a password (8 to 72 characters). Passwords are stored with BCrypt. The response is a JWT whose subject is the numeric user id. The UI keeps that token in <code>localStorage</code> under <code>linksentinel.token</code> and sends <code>Authorization: Bearer</code> on later calls. Emails are stored in lower case. A duplicate email is 409. A wrong password is 401.</p>
+<p>On startup, if <code>DEMO_EMAIL</code> and <code>DEMO_PASSWORD</code> are both set, the API creates that user when the email is new. Defaults are <code>demo@linksentinel.local</code> and <code>password123</code>. An existing row is left alone, so a later password change in the environment does not overwrite the hash.</p>
+
+<h3>Create a short link</h3>
+<p><code>POST /api/links</code> takes <code>url</code>, an optional <code>alias</code>, and an optional <code>expiresAt</code>. The URL must be http or https and at most 2048 characters. An alias must match <code>^[0-9A-Za-z]{3,32}$</code>. The words <code>api</code>, <code>v3</code>, <code>error</code>, <code>actuator</code>, and <code>swagger</code> are reserved so a short code cannot hide the API. A past expiry is 400. A taken alias is 409.</p>
+<p>If the caller does not send an alias, the code is a base62 encoding of the next value from <code>link_code_seq</code> (alphabet <code>0-9A-Za-z</code>). A unique violation retries a few times.</p>
+<p>Before the row is saved, the URL is screened. The verdict (safe or unsafe, reason, title, summary, source) is stored on the link. An unsafe verdict does not block creation. The badge is the warning.</p>
+
+<h3>Redirect</h3>
+<p><code>GET /{code}</code> is public. It looks up Redis key <code>link:{code}</code>. A hit returns the cached URL. A miss reads Postgres, and a live link is written back to Redis. The TTL is the shorter of <code>CACHE_TTL</code> (default 1 hour) and the time left before expiry. The response is 302 with a <code>Location</code> header. Unknown code is 404. An expired link is 410 and is not served from a fresh database read.</p>
+<p>After the 302 is decided, a virtual thread stores the click: time, referrer (or direct), and device type from the user agent (DESKTOP, MOBILE, TABLET, BOT). That insert does not delay the redirect. Clicks still in the executor can be lost if the process stops.</p>
+
+<h3>Rate limit</h3>
+<p>Every API and redirect request goes through a Redis token bucket. After login the bucket is the user id. Before login it is the socket address. It does not read <code>X-Forwarded-For</code>. The bucket math is in <code>TokenBucket</code> and the same steps run atomically in <code>redis/token_bucket.lua</code>. A denied call is 429 with <code>Retry-After</code>. Defaults are capacity 30 and refill 0.5 tokens per second. The Redis key includes the capacity so an old bucket is not reused after a config change.</p>
+
+<h3>Analytics</h3>
+<p><code>GET /api/links/{code}/stats</code> returns the owner's link only. Someone else's code is 404. The payload has the target URL, total clicks, clicks by day, up to 10 referrers, device counts, and the screening verdict.</p>
+
+<h3>Where AI is used</h3>
+<p>The model runs only when a link is created. It is never called on the redirect. The client is Spring <code>RestClient</code>, not Spring AI, so the process still starts when no key is set. It POSTs to <code>{LLM_BASE_URL}/v1/chat/completions</code> and asks for JSON: safe or unsafe, reason, a short title, and a summary. Provider, base URL, key, model, and timeout come from the environment. Defaults are provider <code>openai</code>, base <code>https://api.openai.com</code>, model <code>gpt-4o-mini</code>, timeout 3 seconds.</p>
+<p>The verdict is cached in Redis under the SHA-256 of the URL. A model result is kept 24 hours. If the call fails, times out, or the key is empty, a rule check runs and the link is still created. Rules cover a raw IP host, credentials embedded in the URL, the hosts <code>phish.test</code> and <code>malware.example</code>, and patterns such as <code>verify-account</code>, <code>free-prize</code>, and <code>secure-login</code>. A rules result is cached 10 minutes. The current Compose stack has no LLM key, so the DocuFlow link was marked Safe by the rule check ("No suspicious pattern found"), not by a model.</p>
+
+<h2>4. What is in the product</h2>
+<h3>UI pages</h3>
+<p>There is no landing page. Routes are <code>/login</code>, <code>/</code>, and <code>/links/:code</code>.</p>
+<ul>
+  <li>Login: sign in, or switch to create account. API errors and field errors are shown. A 429 shows the retry wait.</li>
+  <li>Links: URL, optional alias, optional expiry, Shorten, then the list with copy, analytics, and delete. Empty, loading, and error states are on the page.</li>
+  <li>Analytics: verdict, summary, reason, click count, clicks-by-day bar chart, referrers, and devices.</li>
+</ul>
+
+<h3>HTTP API</h3>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth</th><th>Result</th></tr>
+  <tr><td>POST</td><td><code>/api/auth/register</code></td><td>no</td><td>201 and a JWT. Duplicate email is 409.</td></tr>
+  <tr><td>POST</td><td><code>/api/auth/login</code></td><td>no</td><td>200 and a JWT. Bad credentials are 401.</td></tr>
+  <tr><td>POST</td><td><code>/api/links</code></td><td>JWT</td><td>201. Bad URL or past expiry is 400. Alias taken is 409.</td></tr>
+  <tr><td>GET</td><td><code>/api/links</code></td><td>JWT</td><td>Links owned by the caller.</td></tr>
+  <tr><td>DELETE</td><td><code>/api/links/{code}</code></td><td>JWT</td><td>204. Someone else's code is 404. The cache entry is removed.</td></tr>
+  <tr><td>GET</td><td><code>/api/links/{code}/stats</code></td><td>JWT</td><td>Clicks, referrers, devices, screening.</td></tr>
+  <tr><td>GET</td><td><code>/{code}</code></td><td>no</td><td>302. Unknown is 404. Expired is 410.</td></tr>
+</table>
+<p>Errors are JSON: <code>error</code>, <code>message</code>, and <code>fields</code> when validation failed. Swagger UI is at <code>/swagger-ui.html</code>. OpenAPI JSON is at <code>/v3/api-docs</code>.</p>
+
+<h3>Data</h3>
+<p><code>users</code> holds email, password hash, and created time. <code>links</code> holds code, target URL, owner, expiry, and the screening columns. <code>clicks</code> holds link id, time, referrer, and device, and is deleted with the link. Flyway migration <code>V1__init.sql</code> creates them. Hibernate validates the schema. It does not create tables.</p>
+
+<h2>5. Architecture</h2>
+<pre>Browser
+  |-- React UI (port 5173) -- REST --> Spring Boot API (port 8080)
+  |-- GET /{code} ------------------> Spring Boot API
+                                        |-- PostgreSQL (users, links, clicks)
+                                        |-- Redis (link cache, screen cache, rate-limit buckets)
+                                        |-- LLM HTTP API (only on link create)</pre>
+<p>Docker Compose runs four services: <code>postgres:18.7-alpine</code>, <code>redis:8.10.3-alpine</code>, the API image (Eclipse Temurin 25, jar built in the image), and the UI image (Vite build served by nginx). The browser talks to <code>http://localhost:8080</code> because <code>VITE_API_URL</code> is baked in at image build. CORS allows <code>CORS_ORIGIN</code> (default <code>http://localhost:5173</code>) and exposes <code>Retry-After</code>.</p>
+<p>JWT and rate-limit filters are on the security chain only. They are not also registered as servlet filters. If they were, the limiter would count the caller as anonymous and then skip its second run.</p>
+
+<h2>6. Tech stack</h2>
+<table>
+  <tr><th>Piece</th><th>Choice</th></tr>
+  <tr><td>Language</td><td>Java 25</td></tr>
+  <tr><td>API</td><td>Spring Boot 4.1.2 (Web MVC, Validation, Security, Data JPA, Data Redis, Flyway)</td></tr>
+  <tr><td>Auth</td><td>BCrypt passwords, JWT HS256 via jjwt 0.13.0. Secret must be at least 32 characters.</td></tr>
+  <tr><td>Database</td><td>PostgreSQL 18.7 in Compose. Hibernate ORM 7. Flyway 12.</td></tr>
+  <tr><td>Cache and limiter</td><td>Redis 8.10.3. Cache-aside for code to URL. Lua token bucket.</td></tr>
+  <tr><td>API docs</td><td>springdoc-openapi 3.2.0</td></tr>
+  <tr><td>AI client</td><td>Spring RestClient to an OpenAI-compatible chat completions endpoint</td></tr>
+  <tr><td>Backend tests</td><td>JUnit 5, MockMvc, Testcontainers 2.0.5. If Docker is down, embedded Postgres 18.6 and embedded Redis.</td></tr>
+  <tr><td>UI</td><td>React 19.3, Vite 8.3, Tailwind 4.3, React Router 7.18, Recharts 3.10</td></tr>
+  <tr><td>UI tests</td><td>Vitest 5.1 and Testing Library. One Playwright 1.65 flow.</td></tr>
+  <tr><td>Run</td><td>Docker Compose. Maven Wrapper 3.10 for the backend. Node 24 for the frontend image.</td></tr>
+</table>
+
+<h2>7. How to run</h2>
+<pre>copy .env.example .env
+docker compose up --build</pre>
+<p>Set <code>JWT_SECRET</code> to at least 32 characters. Leave <code>LLM_API_KEY</code> empty to use rules, or set <code>LLM_BASE_URL</code>, <code>LLM_API_KEY</code>, and <code>LLM_MODEL</code>. UI: http://localhost:5173. API: http://localhost:8080. Swagger: http://localhost:8080/swagger-ui.html. Demo login: <code>demo@linksentinel.local</code> / <code>password123</code>.</p>
+<p>Backend tests, from <code>backend</code>: <code>.\mvnw.cmd test</code>. Frontend, from <code>frontend</code>, with the API on port 8080 for the browser test: <code>npm test</code> then <code>npm run e2e</code>.</p>
+
+<h2>8. Tests and measured results</h2>
+<p>On 17 Nov 2026, <code>.\mvnw.cmd test</code> ran 19 tests and 0 failures. That process did not use Docker. It logged <code>Integration services: embedded Postgres and Redis (Docker engine is not running)</code> and used Postgres 18.6. The same tests cover base62, the token bucket, create then redirect then stats, duplicate alias 409, invalid URL 400, expired link 410, missing token 401, rate limit 429, a cache hit (the second redirect still returns the cached URL after the database row changes), an unsafe mocked model verdict, and a model failure that falls back to rules.</p>
+<p>Redirect load, 400 requests, 25 in flight, 30 warmup requests, HTTP 302 only:</p>
+<table>
+  <tr><th>Mode</th><th>p50</th><th>p95</th><th>requests/sec</th><th>errors</th></tr>
+  <tr><td>Redis cache on</td><td>176.26 ms</td><td>616.50 ms</td><td>104.1</td><td>0</td></tr>
+  <tr><td>Cache off</td><td>214.27 ms</td><td>399.31 ms</td><td>110.0</td><td>0</td></tr>
+</table>
+<p>The cache lowered the median. On this run the tail and the requests per second did not. Both modes share one JVM and both still write clicks to Postgres.</p>
+<p>Frontend, 15 Nov 2026: Vitest 5 tests, 0 failures, 14.91s. Playwright 1 test passed in 20.9s (create account, shorten <code>https://example.com/docs</code>, see it in the list).</p>
+<p>Later on 17 Nov 2026, <code>docker compose up --build</code> started Postgres 18.7, Redis 8.10.3, the API, and the UI. Demo login returned 200. In the UI, <code>https://docuflow-gbh3.onrender.com/</code> became <code>http://localhost:8080/1</code>, opened DocuFlow in the browser, and the analytics page showed the clicks, referrer <code>direct</code>, and device <code>DESKTOP</code>.</p>
+
+<h2>9. Screenshots</h2>
+<p>Sign in.</p>
+<img src="screenshots/login.png" alt="Sign in page" />
+<p>A shortened link and the Safe badge.</p>
+<img src="screenshots/links.png" alt="Links page" />
+<p>Click analytics.</p>
+<img src="screenshots/analytics.png" alt="Analytics page" />
+
+<h2>10. Design choices</h2>
+<ul>
+  <li>RestClient instead of Spring AI, so a missing key still boots and falls back to rules.</li>
+  <li>Token-bucket math is unit tested in Java and executed atomically in Lua.</li>
+  <li>Cache-aside stores link id and URL. TTL stops at expiry.</li>
+  <li>Clicks use a virtual-thread executor. The Hikari pool is 20 so those inserts do not starve redirect reads.</li>
+  <li>One service. No Kafka, no geolocation, no OAuth server.</li>
+</ul>
+
+<h2>11. Limits</h2>
+<ul>
+  <li>One OpenAI-compatible chat endpoint. The provider name is a label plus a log line.</li>
+  <li>No API key means rules only. The rule list is short. It is not a reputation feed.</li>
+  <li>Rate limit uses the user id, or the socket address before login.</li>
+  <li>A SQL edit does not evict Redis. Delete through the API does.</li>
+  <li>The UI stores the JWT in localStorage.</li>
+  <li>The frontend image calls <code>http://localhost:8080</code>. A public UI needs a rebuild with the public API URL.</li>
+  <li>Short <code>localhost</code> links only work on the machine that runs the API.</li>
+</ul>
+</body>
+</html>

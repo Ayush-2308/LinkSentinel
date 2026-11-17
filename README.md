@@ -43,7 +43,7 @@ docker compose up --build
 
 The UI is at http://localhost:5173, the API at http://localhost:8080, and Swagger UI at http://localhost:8080/swagger-ui.html.
 
-The Compose file publishes Postgres 18.7 and Redis 8.10.3. On this machine the Docker engine could not start because virtualization is disabled, so the tests below did not run those containers. They used embedded Postgres 18.6 and embedded Redis instead. The application code is the same.
+The Compose file publishes Postgres 18.7 and Redis 8.10.3. The backend test run on 17 Nov 2026 used embedded Postgres 18.6 and embedded Redis, because the Docker engine was not available in that test process. The same day, `docker compose up --build` started the real images: Postgres 18.7, Redis 8.10.3, the API, and the UI. A fuller write-up is in `docs/LinkSentinel-Documentation.pdf`.
 
 ## API
 
